@@ -1,0 +1,58 @@
+[Unit]
+Description=Member Management Django Application
+Documentation=https://github.com/your-repo/member-management
+After=network.target postgresql.service redis.service
+Wants=postgresql.service
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+RuntimeDir=member-management
+WorkingDirectory=/var/www/member-management/backend
+Environment="PATH=/var/www/member-management/backend/venv/bin"
+EnvironmentFile=-/var/www/member-management/backend/.env
+
+# Gunicorn配置
+ExecStart=/var/www/member-management/backend/venv/bin/gunicorn \
+          --workers 3 \
+          --worker-class sync \
+          --threads 4 \
+          --worker-connections 1000 \
+          --max-requests 1000 \
+          --max-requests-jitter 50 \
+          --timeout 120 \
+          --keepalive 5 \
+          --bind 127.0.0.1:8000 \
+          --backlog 2048 \
+          --log-level info \
+          --access-logfile /var/log/member-management/gunicorn-access.log \
+          --error-logfile /var/log/member-management/gunicorn-error.log \
+          --capture-output \
+          --enable-stdio-inheritance \
+          member_management.wsgi:application
+
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=3
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/member-management/backend/media
+ReadWritePaths=/var/www/member-management/backend/staticfiles
+ReadWritePaths=/var/log/member-management
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
