@@ -67,25 +67,17 @@
         </div>
       </div>
 
-      <!-- 活动图例 -->
-      <div class="legend">
-        <span>活动类型：</span>
-        <span class="legend-item">
-          <span class="legend-dot" style="background: #67c23a"></span>
-          读书会
-        </span>
-        <span class="legend-item">
-          <span class="legend-dot" style="background: #e6a23c"></span>
-          英语角
-        </span>
-        <span class="legend-item">
-          <span class="legend-dot" style="background: #f56c6c"></span>
-          讲座
-        </span>
-      </div>
+        <!-- 活动图例 -->
+        <div class="legend" v-if="activityTypes.length > 0">
+          <span>活动类型：</span>
+          <span class="legend-item" v-for="type in activityTypes" :key="type.id">
+            <span class="legend-dot" :style="{ background: type.color }"></span>
+            {{ type.name }}
+          </span>
+        </div>
+    <!-- 日期活动详情对话框 -->
     </el-card>
 
-    <!-- 日期活动详情对话框 -->
     <el-dialog
       v-model="dayDialogVisible"
       :title="`${selectedDate} 的活动`"
@@ -140,6 +132,7 @@ const calendarData = ref({})
 const dayDialogVisible = ref(false)
 const selectedDate = ref('')
 const selectedDayActivities = ref([])
+const activityTypes = ref([])
 
 const weekdays = ['日', '一', '二', '三', '四', '五', '六']
 
@@ -258,6 +251,16 @@ const formatTime = (dateTime) => {
   })
 }
 
+// 获取活动类型
+const fetchActivityTypes = async () => {
+  try {
+    const res = await activityApi.getTypes({ is_active: true })
+    activityTypes.value = res.results || res
+  } catch (error) {
+    console.error('获取活动类型失败', error)
+  }
+}
+
 // 获取日历数据
 const fetchCalendarData = async () => {
   loading.value = true
@@ -323,6 +326,7 @@ onMounted(() => {
   const now = new Date()
   currentMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   fetchCalendarData()
+  fetchActivityTypes()
 })
 </script>
 

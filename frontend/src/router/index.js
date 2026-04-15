@@ -79,7 +79,12 @@ const routes = [
         path: 'activities/calendar',
         name: 'ActivityCalendar',
         component: () => import('@/views/activities/ActivityCalendar.vue')
-      }
+      },
+      {
+          path: 'activities/types',
+          name: 'ActivityTypes',
+          component: () => import('@/views/activities/ActivityTypeList.vue')
+       }
     ]
   }
 ]

@@ -45,6 +45,10 @@
             <el-icon><Calendar /></el-icon>
             <span>活动日历</span>
           </el-menu-item>
+        <el-menu-item index="/activities/types">
+         <el-icon><PriceTag /></el-icon>
+           <span>活动类型</span>
+        </el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -85,7 +89,7 @@ import { ElMessageBox, ElMessage } from 'element-plus'
 import {
   DataAnalysis, User, Reading, Collection,
   UserFilled, ArrowDown, SwitchButton,
-  Calendar, List, DataLine
+  Calendar, List, DataLine,PriceTag
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -100,7 +104,8 @@ const titles = {
   '/books': '书籍管理',
   '/activities': '活动列表',
   '/activities/summary': '会员活动统计',
-  '/activities/calendar': '活动日历'
+  '/activities/calendar': '活动日历',
+  '/activities/types': '活动类型管理'
 }
 
 const activeMenu = computed(() => route.path)
