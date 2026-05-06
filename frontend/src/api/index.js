@@ -44,8 +44,11 @@
           case 500:
             ElMessage.error('服务器错误')
             break
+          // 400 错误不在此处处理，由组件自己处理
           default:
-            ElMessage.error(error.response.data?.detail || '请求失败')
+            if (error.response.status !== 400) {
+              ElMessage.error(error.response.data?.detail || '请求失败')
+            }
         }
       } else {
         ElMessage.error('网络错误')

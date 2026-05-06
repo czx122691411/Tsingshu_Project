@@ -27,17 +27,8 @@
 
         <!-- 表格 -->
         <el-table :data="types" v-loading="loading" border style="width: 100%">
-          <el-table-column prop="name" label="类型名称" min-width="120" />
-          <el-table-column prop="code" label="代码" width="150" />
-          <el-table-column label="颜色" width="100">
-            <template #default="{ row }">
-              <div class="color-preview">
-                <span :style="{ backgroundColor: row.color }" class="color-block"></span>
-                <span>{{ row.color }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="name" label="类型名称" min-width="150" />
+          <el-table-column prop="description" label="描述" min-width="250" show-overflow-tooltip />
           <el-table-column label="状态" width="80" align="center">
             <template #default="{ row }">
               <el-tag :type="row.is_active ? 'success' : 'info'">
@@ -80,7 +71,11 @@
             <el-input v-model="form.code" placeholder="请输入英文代码" />
           </el-form-item>
           <el-form-item label="颜色" prop="color">
-            <el-color-picker v-model="form.color" />
+            <el-color-picker
+              v-model="form.color"
+              show-alpha="false"
+              color-format="hex"
+            />
             <el-input v-model="form.color" placeholder="选择或输入颜色值" style="width: 200px; margin-left: 10px" />
           </el-form-item>
           <el-form-item label="描述">
@@ -182,7 +177,8 @@
   }
 
   const resetForm = () => {
-    formRef.value?.resetFields()
+    // 重置表单字段但不修改初始值
+    formRef.value?.clearValidate()
   }
 
   const handleSubmit = async () => {
@@ -191,6 +187,9 @@
 
     submitting.value = true
     try {
+      // 调试：打印提交的数据
+      console.log('[ActivityType] 提交数据:', JSON.parse(JSON.stringify(form)))
+
       if (isEdit.value) {
         await activityApi.updateType(form.id, form)
         ElMessage.success('更新成功')
@@ -201,6 +200,7 @@
       dialogVisible.value = false
       fetchTypes()
     } catch (error) {
+      console.error('[ActivityType] 提交失败:', error)
       ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
     } finally {
       submitting.value = false
@@ -215,8 +215,15 @@
       await activityApi.deleteType(row.id)
       ElMessage.success('删除成功')
       fetchTypes()
-    } catch {
-      // 取消删除
+    } catch (error) {
+      // 区分用户取消删除和删除失败
+      if (error === 'cancel') {
+        // 用户取消删除，不做处理
+        return
+      }
+      // 删除失败，显示错误消息
+      const errorMsg = error.response?.data?.error || error.response?.data?.detail || '删除失败'
+      ElMessage.error(errorMsg)
     }
   }
 

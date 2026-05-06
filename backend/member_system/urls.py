@@ -6,6 +6,8 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -15,3 +17,7 @@ urlpatterns = [
     # 新增：活动管理模块（需要放在 members 之后，因为 members 视图集中有 activity-summary 等端点）
     path('api/', include('apps.activities.urls')),
 ]
+
+# 开发环境下提供媒体文件服务
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -14,7 +14,7 @@
       <!-- 筛选 -->
       <el-form :inline="true" :model="filters" class="filter-form">
         <el-form-item label="搜索">
-          <el-input v-model="filters.search" placeholder="主题/地点" clearable @clear="fetchActivities" @keyup.enter="fetchActivities" />
+          <el-input v-model="filters.search" placeholder="活动主题" clearable @clear="fetchActivities" @keyup.enter="fetchActivities" />
         </el-form-item>
         <el-form-item label="活动类型">
           <el-select v-model="filters.activity_type" placeholder="全部" clearable @change="fetchActivities">
@@ -41,6 +41,20 @@
 
       <!-- 表格 -->
       <el-table :data="activities" v-loading="loading" border style="width: 100%">
+        <el-table-column label="封面" width="100">
+          <template #default="{ row }">
+            <div v-if="row.cover_image" class="cover-image-container">
+              <el-image
+                :src="getCoverImageUrl(row.cover_image)"
+                fit="cover"
+                class="cover-image"
+                :preview-src-list="[getCoverImageUrl(row.cover_image)]"
+                preview-teleported
+              />
+            </div>
+            <span v-else class="no-cover">暂无封面</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="title" label="活动主题" min-width="200" />
         <el-table-column label="类型" width="120">
           <template #default="{ row }">
@@ -49,7 +63,6 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="location" label="地点" width="150" />
         <el-table-column label="开始时间" width="160">
           <template #default="{ row }">
             {{ formatDateTime(row.start_time) }}
@@ -86,7 +99,11 @@
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="register" v-if="!row.is_finished">
+                    <el-dropdown-item command="edit" v-if="isAdmin">
+                      <el-icon><Edit /></el-icon>
+                      <span>编辑</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="register" v-if="!row.is_finished" :divided="isAdmin">
                       <el-icon><Plus /></el-icon>
                       <span>报名</span>
                     </el-dropdown-item>
@@ -134,8 +151,20 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="地点" prop="location">
-          <el-input v-model="form.location" placeholder="请输入活动地点" />
+        <el-form-item label="活动封面">
+          <el-upload
+            class="cover-uploader"
+            :action="uploadUrl"
+            :headers="uploadHeaders"
+            :show-file-list="false"
+            :on-success="handleUploadSuccess"
+            :before-upload="beforeUpload"
+            accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+          >
+            <img v-if="form.cover_image" :src="getCoverImageUrl(form.cover_image)" class="cover-preview" />
+            <el-icon v-else class="cover-uploader-icon"><Plus /></el-icon>
+          </el-upload>
+          <div class="upload-tip">支持 jpg、jpeg、png、gif、webp 格式，建议尺寸 800x600，大小不超过 5MB</div>
         </el-form-item>
         <el-form-item label="开始时间" prop="start_time">
           <el-date-picker
@@ -170,23 +199,34 @@
 
     <!-- 活动详情对话框 -->
     <el-dialog v-model="detailVisible" title="活动详情" width="800px">
-      <el-descriptions v-if="currentActivity" :column="2" border>
-        <el-descriptions-item label="活动主题">{{ currentActivity.title }}</el-descriptions-item>
-        <el-descriptions-item label="活动类型">{{ currentActivity.activity_type_display }}</el-descriptions-item>
-        <el-descriptions-item label="地点">{{ currentActivity.location }}</el-descriptions-item>
-        <el-descriptions-item label="费用">¥{{ currentActivity.fee }}</el-descriptions-item>
-        <el-descriptions-item label="开始时间">{{ formatDateTime(currentActivity.start_time) }}</el-descriptions-item>
-        <el-descriptions-item label="结束时间">{{ currentActivity.end_time ? formatDateTime(currentActivity.end_time) : '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="getStatusType(currentActivity.status)">
-            {{ currentActivity.status_display }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="已报名人数">{{ currentActivity.registered_count }}</el-descriptions-item>
-        <el-descriptions-item label="活动描述" :span="2">
-          {{ currentActivity.description || '-' }}
-        </el-descriptions-item>
-      </el-descriptions>
+      <div v-if="currentActivity">
+        <!-- 封面图片 -->
+        <div v-if="currentActivity.cover_image" class="detail-cover">
+          <el-image
+            :src="getCoverImageUrl(currentActivity.cover_image)"
+            fit="contain"
+            class="detail-cover-image"
+            :preview-src-list="[getCoverImageUrl(currentActivity.cover_image)]"
+            preview-teleported
+          />
+        </div>
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="活动主题">{{ currentActivity.title }}</el-descriptions-item>
+          <el-descriptions-item label="活动类型">{{ currentActivity.activity_type_display }}</el-descriptions-item>
+          <el-descriptions-item label="费用">¥{{ currentActivity.fee }}</el-descriptions-item>
+          <el-descriptions-item label="开始时间">{{ formatDateTime(currentActivity.start_time) }}</el-descriptions-item>
+          <el-descriptions-item label="结束时间">{{ currentActivity.end_time ? formatDateTime(currentActivity.end_time) : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="getStatusType(currentActivity.status)">
+              {{ currentActivity.status_display }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="已报名人数">{{ currentActivity.registered_count }}</el-descriptions-item>
+          <el-descriptions-item label="活动描述" :span="2">
+            {{ currentActivity.description || '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
 
       <el-divider>报名名单</el-divider>
       <el-table :data="currentActivity.participations" size="small">
@@ -213,8 +253,16 @@
       @close="resetRegisterForm"
     >
       <el-form :model="registerForm" :rules="registerRules" ref="registerFormRef" label-width="100px">
-        <el-form-item label="选择会员" prop="member_id">
-          <el-select v-model="registerForm.member_id" placeholder="请选择会员" style="width: 100%" filterable>
+        <el-form-item label="选择会员" prop="member_ids">
+          <el-select
+            v-model="registerForm.member_ids"
+            placeholder="请选择会员（可多选）"
+            style="width: 100%"
+            filterable
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+          >
             <el-option
               v-for="member in memberOptions"
               :key="member.id"
@@ -238,12 +286,19 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, View, ArrowDown, Delete } from '@element-plus/icons-vue'
+import { Plus, View, ArrowDown, Delete, Edit } from '@element-plus/icons-vue'
 import { activityApi } from '@/api/activities'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
+
+// API 基础 URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const uploadUrl = `${API_BASE_URL}/api/activities/upload_cover/`
+const uploadHeaders = computed(() => ({
+  'Authorization': `Bearer ${authStore.token}`
+}))
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -254,6 +309,7 @@ const registerDialogVisible = ref(false)
 const formRef = ref(null)
 const registerFormRef = ref(null)
 const isEdit = ref(false)
+const currentEditId = ref(null)
 const currentActivity = ref(null)
 const memberOptions = ref([])
 const activityTypes = ref([])
@@ -273,7 +329,7 @@ const pagination = reactive({
 const form = reactive({
   title: '',
   activity_type: null,
-  location: '',
+  cover_image: null,
   start_time: '',
   end_time: '',
   fee: 0,
@@ -281,23 +337,41 @@ const form = reactive({
 })
 
 const registerForm = reactive({
-  member_id: '',
+  member_ids: [],
   note: ''
 })
 
 const registerRules = {
-  member_id: [{ required: true, message: '请选择会员', trigger: 'change' }]
+  member_ids: [
+    { required: true, message: '请选择会员', trigger: 'change', validator: (rule, value, callback) => {
+      if (!value || value.length === 0) {
+        callback(new Error('请选择至少一个会员'))
+      } else {
+        callback()
+      }
+    }}
+  ]
 }
 
 const rules = {
   title: [{ required: true, message: '请输入活动主题', trigger: 'blur' }],
   activity_type: [{ required: true, message: '请选择活动类型', trigger: 'change' }],
-  location: [{ required: true, message: '请输入活动地点', trigger: 'blur' }],
   start_time: [{ required: true, message: '请选择开始时间', trigger: 'change' }],
   fee: [{ required: true, message: '请输入费用', trigger: 'change' }]
 }
 
 const dialogTitle = computed(() => isEdit.value ? '编辑活动' : '新增活动')
+
+// 获取封面图片 URL
+const getCoverImageUrl = (imagePath) => {
+  if (!imagePath) return ''
+  // 如果是完整 URL，直接返回
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    return imagePath
+  }
+  // 否则拼接 API 基础 URL
+  return `${API_BASE_URL}${imagePath}`
+}
 
 const getStatusType = (status) => {
   const types = { upcoming: 'info', ongoing: 'warning', finished: 'info' }
@@ -314,6 +388,32 @@ const formatDateTime = (dateTime) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+// 上传前校验
+const beforeUpload = (file) => {
+  const isImage = file.type.startsWith('image/')
+  const isLt5M = file.size / 1024 / 1024 < 5
+
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件!')
+    return false
+  }
+  if (!isLt5M) {
+    ElMessage.error('图片大小不能超过 5MB!')
+    return false
+  }
+  return true
+}
+
+// 上传成功回调
+const handleUploadSuccess = (response) => {
+  if (response.url) {
+    form.cover_image = response.url
+    ElMessage.success('封面上传成功')
+  } else {
+    ElMessage.error('封面上传失败')
+  }
 }
 
 const fetchActivities = async () => {
@@ -364,10 +464,11 @@ const resetFilters = () => {
 
 const showAddDialog = () => {
   isEdit.value = false
+  currentEditId.value = null
   Object.assign(form, {
     title: '',
     activity_type: activityTypes.value[0]?.id || null,
-    location: '',
+    cover_image: null,
     start_time: '',
     end_time: '',
     fee: 0,
@@ -376,8 +477,29 @@ const showAddDialog = () => {
   dialogVisible.value = true
 }
 
+const showEditDialog = async (row) => {
+  try {
+    const res = await activityApi.getDetail(row.id)
+    isEdit.value = true
+    currentEditId.value = row.id
+    Object.assign(form, {
+      title: res.title,
+      activity_type: res.activity_type,
+      cover_image: res.cover_image,
+      start_time: res.start_time,
+      end_time: res.end_time || '',
+      fee: res.fee,
+      description: res.description || ''
+    })
+    dialogVisible.value = true
+  } catch (error) {
+    ElMessage.error('获取活动信息失败')
+  }
+}
+
 const resetForm = () => {
   formRef.value?.resetFields()
+  currentEditId.value = null
 }
 
 const handleSubmit = async () => {
@@ -386,12 +508,17 @@ const handleSubmit = async () => {
 
   submitting.value = true
   try {
-    await activityApi.create(form)
-    ElMessage.success('创建成功')
+    if (isEdit.value && currentEditId.value) {
+      await activityApi.update(currentEditId.value, form)
+      ElMessage.success('更新成功')
+    } else {
+      await activityApi.create(form)
+      ElMessage.success('创建成功')
+    }
     dialogVisible.value = false
     fetchActivities()
   } catch (error) {
-    ElMessage.error('创建失败')
+    ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
   } finally {
     submitting.value = false
   }
@@ -409,7 +536,7 @@ const showDetail = async (row) => {
 
 const handleRegister = async (row) => {
   currentActivity.value = row
-  registerForm.member_id = ''
+  registerForm.member_ids = []
   registerForm.note = ''
   registerDialogVisible.value = true
 
@@ -420,7 +547,7 @@ const handleRegister = async (row) => {
 }
 
 const resetRegisterForm = () => {
-  registerForm.member_id = ''
+  registerForm.member_ids = []
   registerForm.note = ''
 }
 
@@ -430,12 +557,20 @@ const handleSubmitRegister = async () => {
 
   submitting.value = true
   try {
-    await activityApi.register(currentActivity.value.id, registerForm)
-    ElMessage.success('报名成功')
+    const result = await activityApi.register(currentActivity.value.id, {
+      member_ids: registerForm.member_ids,
+      note: registerForm.note
+    })
+
+    // 根据返回结果显示不同的消息
+    const message = result.message || '报名完成'
+    ElMessage.success(message)
+
     registerDialogVisible.value = false
     fetchActivities()
   } catch (error) {
-    ElMessage.error(error.response?.data?.error || '报名失败')
+    const errorMsg = error.response?.data?.error || error.response?.data?.detail || '报名失败'
+    ElMessage.error(errorMsg)
   } finally {
     submitting.value = false
   }
@@ -455,7 +590,9 @@ const handleDelete = async (row) => {
 }
 
 const handleActionCommand = (command, row) => {
-  if (command === 'register') {
+  if (command === 'edit') {
+    showEditDialog(row)
+  } else if (command === 'register') {
     handleRegister(row)
   } else if (command === 'delete') {
     handleDelete(row)
@@ -495,6 +632,80 @@ onMounted(() => {
 .filter-form :deep(.el-form-item__label) {
   font-size: var(--font-size-base);
   font-weight: 500;
+}
+
+/* 封面图片样式 */
+.cover-image-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.cover-image {
+  width: 80px;
+  height: 80px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.no-cover {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+/* 上传组件样式 */
+.cover-uploader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.cover-uploader :deep(.el-upload) {
+  border: 1px dashed var(--el-border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: var(--el-transition-duration-fast);
+}
+
+.cover-uploader :deep(.el-upload:hover) {
+  border-color: var(--el-color-primary);
+}
+
+.cover-uploader-icon {
+  font-size: 28px;
+  color: #8c939d;
+  width: 178px;
+  height: 178px;
+  text-align: center;
+  line-height: 178px;
+}
+
+.cover-preview {
+  width: 178px;
+  height: 178px;
+  display: block;
+  object-fit: cover;
+}
+
+.upload-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+}
+
+/* 详情页封面样式 */
+.detail-cover {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.detail-cover-image {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: 8px;
 }
 
 /* 操作按钮布局优化 */

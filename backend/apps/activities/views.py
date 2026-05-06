@@ -6,14 +6,19 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
 from django.shortcuts import get_object_or_404
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .models import Activity, ActivityParticipation, ActivityType
 from .serializers import (
     ActivityListSerializer, ActivityDetailSerializer,
-    ActivityCreateSerializer, ActivityParticipationSerializer,
+    ActivityCreateSerializer, ActivityUpdateSerializer, ActivityParticipationSerializer,
     ActivityCalendarSerializer, MemberActivitySummarySerializer,
     MemberActivityDetailSerializer, RegisterActivitySerializer,
     ActivityTypeSerializer
@@ -30,13 +35,26 @@ class ActivityTypeViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'code']
     ordering = ['id']
 
+    def destroy(self, request, *args, **kwargs):
+        """删除活动类型前检查是否被活动引用"""
+        from django.db.models import ProtectedError
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            instance = self.get_object()
+            activity_count = instance.activities.count()
+            return Response(
+                {'detail': f'该活动类型已被 {activity_count} 个活动使用，无法删除。请先删除或修改这些活动。'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
 
 class ActivityViewSet(viewsets.ModelViewSet):
     """活动视图集"""
     permission_classes = [IsAdminOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['activity_type', 'status']
-    search_fields = ['title', 'location', 'description']
+    search_fields = ['title', 'description']
     ordering_fields = ['start_time', 'created_at']
     ordering = ['-start_time']
 
@@ -61,6 +79,8 @@ class ActivityViewSet(viewsets.ModelViewSet):
             return ActivityListSerializer
         if self.action == 'create':
             return ActivityCreateSerializer
+        if self.action in ['update', 'partial_update']:
+            return ActivityUpdateSerializer
         return ActivityDetailSerializer
 
     def perform_create(self, serializer):
@@ -83,8 +103,11 @@ class ActivityViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def register(self, request, pk=None):
         """
-        会员报名活动
+        会员报名活动（支持批量报名）
         POST /api/activities/{id}/register/
+        请求体：
+        - member_ids: 会员ID列表（支持单个会员或批量）
+        - note: 备注（可选）
         """
         from apps.members.models import Member
 
@@ -97,45 +120,91 @@ class ActivityViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        serializer = RegisterActivitySerializer(data=request.data)
-        if serializer.is_valid():
-            member_id = serializer.validated_data['member_id']
+        # 获取会员ID列表
+        member_ids = request.data.get('member_ids')
+        if not member_ids:
+            # 兼容旧的单会员报名接口
+            member_id = request.data.get('member_id')
+            if member_id:
+                member_ids = [member_id]
+            else:
+                return Response(
+                    {'error': '请选择会员'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
+        # 确保 member_ids 是列表
+        if isinstance(member_ids, int):
+            member_ids = [member_ids]
+        elif isinstance(member_ids, str):
+            member_ids = [int(member_ids)]
+
+        note = request.data.get('note', '')
+
+        results = {
+            'success': [],
+            'failed': [],
+            'already_registered': []
+        }
+
+        for member_id in member_ids:
             # 检查会员是否存在
             try:
                 member = Member.objects.get(id=member_id)
             except Member.DoesNotExist:
-                return Response(
-                    {'error': '会员不存在'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                results['failed'].append({
+                    'member_id': member_id,
+                    'reason': '会员不存在'
+                })
+                continue
 
             # 检查是否已报名
             if ActivityParticipation.objects.filter(
                 member=member,
                 activity=activity
             ).exists():
-                return Response(
-                    {'error': f'会员 {member.name} 已报名该活动'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                results['already_registered'].append({
+                    'member_id': member_id,
+                    'member_name': member.name
+                })
+                continue
 
             # 创建参与记录
             participation = ActivityParticipation.objects.create(
                 member=member,
                 activity=activity,
                 paid_amount=activity.fee,
-                note=serializer.validated_data.get('note', ''),
+                note=note,
                 created_by=request.user
             )
 
             result_serializer = ActivityParticipationSerializer(participation)
-            return Response(
-                {'message': f'会员 {member.name} 报名成功', 'participation': result_serializer.data},
-                status=status.HTTP_201_CREATED
-            )
+            results['success'].append({
+                'member_id': member_id,
+                'member_name': member.name,
+                'participation': result_serializer.data
+            })
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # 构建返回消息
+        total = len(member_ids)
+        success_count = len(results['success'])
+        already_count = len(results['already_registered'])
+        failed_count = len(results['failed'])
+
+        message_parts = []
+        if success_count > 0:
+            message_parts.append(f'成功报名 {success_count} 人')
+        if already_count > 0:
+            message_parts.append(f'{already_count} 人已报名')
+        if failed_count > 0:
+            message_parts.append(f'{failed_count} 人失败')
+
+        message = '、'.join(message_parts)
+
+        return Response({
+            'message': message,
+            'results': results
+        }, status=status.HTTP_201_CREATED if success_count > 0 else status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def unregister(self, request, pk=None):
@@ -243,6 +312,88 @@ class ActivityViewSet(viewsets.ModelViewSet):
             'total_participations': total_participations,
             'total_revenue': float(total_revenue)
         })
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated], parser_classes=[MultiPartParser, FormParser])
+    def upload_cover(self, request):
+        """
+        上传活动封面图片
+        POST /api/activities/upload-cover/
+        支持的图片格式：jpg、jpeg、png、gif、webp
+        """
+        from django.conf import settings
+
+        logger.info(f'[UPLOAD_COVER] Upload request received. FILES: {list(request.FILES.keys())}, CONTENT_TYPE: {request.content_type}')
+
+        if 'file' not in request.FILES:
+            logger.warning('[UPLOAD_COVER] No file in request.FILES')
+            return Response(
+                {'error': '请选择要上传的图片'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        file = request.FILES['file']
+        logger.info(f'[UPLOAD_COVER] File received: name={file.name}, size={file.size}, content_type={file.content_type}')
+
+        # 验证文件类型
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        file_ext = os.path.splitext(file.name)[1].lower()
+
+        if file_ext not in allowed_extensions:
+            logger.warning(f'[UPLOAD_COVER] Invalid file extension: {file_ext}')
+            return Response(
+                {'error': f'只支持以下图片格式：{", ".join(allowed_extensions)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 验证文件大小（最大5MB）
+        max_size = 5 * 1024 * 1024
+        if file.size > max_size:
+            logger.warning(f'[UPLOAD_COVER] File too large: {file.size} bytes')
+            return Response(
+                {'error': '图片大小不能超过5MB'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 验证是否为图片
+        if not file.content_type.startswith('image/'):
+            logger.warning(f'[UPLOAD_COVER] Invalid content type: {file.content_type}')
+            return Response(
+                {'error': '只能上传图片文件'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 保存文件
+        from django.core.files.storage import default_storage
+        from datetime import datetime
+
+        # 生成文件路径：activity_covers/年/月/原文件名
+        now = timezone.now()
+        relative_path = f'activity_covers/{now.year}/{now.month:02d}/{file.name}'
+
+        # 处理文件名冲突
+        counter = 1
+        original_path = relative_path
+        while default_storage.exists(relative_path):
+            name, ext = os.path.splitext(file.name)
+            relative_path = f'activity_covers/{now.year}/{now.month:02d}/{name}_{counter}{ext}'
+            counter += 1
+
+        # 保存文件
+        try:
+            saved_path = default_storage.save(relative_path, file)
+            file_url = settings.MEDIA_URL + saved_path
+            logger.info(f'[UPLOAD_COVER] File saved successfully: saved_path={saved_path}, file_url={file_url}')
+        except Exception as e:
+            logger.error(f'[UPLOAD_COVER] Error saving file: {str(e)}', exc_info=True)
+            return Response(
+                {'error': f'保存文件失败: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response({
+            'url': file_url,
+            'path': saved_path
+        }, status=status.HTTP_201_CREATED)
 
 
 class MemberActivityViewSet(viewsets.ReadOnlyModelViewSet):

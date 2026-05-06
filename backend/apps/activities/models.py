@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from django.conf import settings
 from apps.users.models import User
 from apps.members.models import Member
 
@@ -27,6 +28,7 @@ class ActivityType(models.Model):
 class Activity(models.Model):
     """活动模型"""
     STATUS_CHOICES = (
+        ('not_started', '未开始'),
         ('upcoming', '即将开始'),
         ('ongoing', '进行中'),
         ('finished', '已结束'),
@@ -40,14 +42,20 @@ class Activity(models.Model):
         related_name='activities',
         verbose_name='活动类型'
     )
-    location = models.CharField(max_length=200, verbose_name='地点')
+    cover_image = models.ImageField(
+        upload_to='activity_covers/%Y/%m/',
+        null=True,
+        blank=True,
+        verbose_name='活动封面',
+        help_text='支持jpg、jpeg、png、gif、webp等格式'
+    )
     start_time = models.DateTimeField(verbose_name='开始时间')
     end_time = models.DateTimeField(null=True, blank=True, verbose_name='结束时间')
     fee = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='费用')
     status = models.CharField(
-        max_length=10,
+        max_length=20,
         choices=STATUS_CHOICES,
-        default='upcoming',
+        default='not_started',
         verbose_name='状态'
     )
     description = models.TextField(blank=True, verbose_name='活动描述')
@@ -76,19 +84,37 @@ class Activity(models.Model):
         super().save(*args, **kwargs)
 
     def calculate_status(self):
-        """根据时间自动计算状态"""
+        """根据时间自动计算状态（使用本地时区）
+
+        状态定义：
+        - finished（已结束）：当前日期 >= 活动开始日期 + 1天（活动举办日次日及之后）
+        - ongoing（进行中）：当前日期 == 活动开始日期（活动当日）
+        - upcoming（即将开始）：活动开始日期 - 当前日期 <= 2 且 > 0（活动举办前2天之内）
+        - not_started（未开始）：活动开始日期 - 当前日期 > 2（活动举办前2天以上）
+        """
         now = timezone.now()
-        if now < self.start_time:
-            return 'upcoming'
-        elif self.end_time and now >= self.end_time:
+        # 使用本地时区（Asia/Shanghai）进行日期计算
+        local_now = timezone.localtime(now)
+        local_start = timezone.localtime(self.start_time)
+
+        current_date = local_now.date()
+        start_date = local_start.date()
+
+        # 计算日期差（当前日期 - 活动开始日期）
+        days_diff = (current_date - start_date).days
+
+        if days_diff >= 1:
+            # 活动举办日次日及之后
             return 'finished'
-        else:
-            # 如果没有设置结束时间，开始后2小时视为结束
-            if not self.end_time:
-                end_time = self.start_time.replace(hour=self.start_time.hour + 2)
-                if now >= end_time:
-                    return 'finished'
+        elif days_diff == 0:
+            # 活动当日
             return 'ongoing'
+        elif days_diff < 0 and abs(days_diff) <= 2:
+            # 活动前2天之内（不包括当天）
+            return 'upcoming'
+        else:
+            # 超过前2天（2天以上），未开始
+            return 'not_started'
 
     @property
     def registered_count(self):

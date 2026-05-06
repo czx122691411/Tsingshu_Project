@@ -57,7 +57,7 @@
                 }"
                 :title="activity.title"
               >
-                <span class="activity-type-text">{{ getActivityTypeDisplay(activity) }}</span>
+                <span class="activity-type-text">{{ activity.title }}</span>
               </div>
               <div v-if="day.activities.length > 3" class="more-indicator">
                 +{{ day.activities.length - 3 }}个活动
@@ -158,8 +158,8 @@ const calendarDays = computed(() => {
   const prevMonthLastDay = new Date(year, month - 1, 0).getDate()
   for (let i = firstDayWeek - 1; i >= 0; i--) {
     const date = prevMonthLastDay - i
-    // 正确处理上个月的年月
-    const prevMonthDate = new Date(year, month - 1, date)
+    // 注意：JavaScript中月份从0开始，所以上个月应该是 month - 2
+    const prevMonthDate = new Date(year, month - 2, date)
     const prevYear = prevMonthDate.getFullYear()
     const prevMonth = prevMonthDate.getMonth() + 1
     const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(date).padStart(2, '0')}`

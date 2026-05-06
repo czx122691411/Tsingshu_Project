@@ -178,43 +178,111 @@
     <el-dialog
       v-model="activitiesVisible"
       :title="`${currentMember.name} - 参与的活动列表`"
-      width="900px"
+      width="1100px"
+      class="activities-dialog"
     >
-      <el-table :data="memberActivities" v-loading="activitiesLoading" border>
-        <el-table-column prop="activity_title" label="活动主题" min-width="200" />
-        <el-table-column label="活动类型" width="120">
-          <template #default="{ row }">
-            <el-tag :style="{
-              backgroundColor: row.activity_type_color,
-              color: '#fff',
-              border: 'none'
-            }" size="small">
-              {{ row.activity_type_name }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="activity_location" label="地点" width="150" />
-        <el-table-column label="活动时间" width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.activity_start_time) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="activity_fee" label="费用" width="80">
-          <template #default="{ row }">
-            ¥{{ row.activity_fee }}
-          </template>
-        </el-table-column>
-        <el-table-column label="报名时间" width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.registered_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="paid_amount" label="实付金额" width="100">
-          <template #default="{ row }">
-            ¥{{ row.paid_amount }}
-          </template>
-        </el-table-column>
-      </el-table>
+      <div v-loading="activitiesLoading" class="activities-container">
+        <div v-if="memberActivities.length === 0" class="empty-state">
+          <el-empty description="暂无活动记录" />
+        </div>
+        <div v-else class="activities-grid">
+          <div
+            v-for="activity in memberActivities"
+            :key="activity.id"
+            class="activity-card"
+          >
+            <!-- 活动封面 -->
+            <div class="activity-cover">
+              <!-- 调试信息 -->
+              <div style="position: absolute; top: 0; left: 0; background: rgba(255,0,0,0.8); color: white; font-size: 10px; padding: 2px; z-index: 999;">
+                封面: {{ activity.activity_cover_image ? '有' : '无' }} | URL: {{ getCoverImage(activity.activity_cover_image) }}
+              </div>
+
+              <el-image
+                v-if="activity.activity_cover_image"
+                :src="getCoverImage(activity.activity_cover_image)"
+                fit="cover"
+                class="cover-image"
+                :preview-src-list="[getCoverImage(activity.activity_cover_image)]"
+                preview-teleported
+              >
+                <template #error>
+                  <div class="image-error">
+                    <el-icon><Picture /></el-icon>
+                    <span>加载失败</span>
+                  </div>
+                </template>
+                <template #placeholder>
+                  <div class="image-placeholder">
+                    加载中...
+                  </div>
+                </template>
+              </el-image>
+              <div v-else class="no-cover">
+                <el-icon :size="40"><Picture /></el-icon>
+                <span>暂无封面</span>
+              </div>
+              <!-- 活动类型标签 -->
+              <div class="activity-type-badge">
+                <el-tag
+                  :style="{
+                    backgroundColor: activity.activity_type_color,
+                    color: '#fff',
+                    border: 'none'
+                  }"
+                  size="small"
+                >
+                  {{ activity.activity_type_name }}
+                </el-tag>
+              </div>
+            </div>
+
+            <!-- 活动信息 -->
+            <div class="activity-info">
+              <h3 class="activity-title">{{ activity.activity_title }}</h3>
+
+              <!-- 活动描述 -->
+              <div v-if="activity.activity_description" class="activity-description">
+                <el-icon class="description-icon"><Document /></el-icon>
+                <p class="description-text">{{ activity.activity_description }}</p>
+              </div>
+
+              <!-- 活动类型描述 -->
+              <div v-if="activity.activity_type_description" class="activity-type-description">
+                <el-icon class="type-icon"><InfoFilled /></el-icon>
+                <span class="type-text">{{ activity.activity_type_description }}</span>
+              </div>
+
+              <div class="activity-details">
+                <div class="detail-item">
+                  <el-icon class="detail-icon"><Clock /></el-icon>
+                  <span>{{ formatDateTime(activity.activity_start_time) }}</span>
+                </div>
+
+                <div class="detail-item">
+                  <el-icon class="detail-icon"><Money /></el-icon>
+                  <span>费用: ¥{{ activity.activity_fee }}</span>
+                </div>
+
+                <div class="detail-item">
+                  <el-icon class="detail-icon"><Calendar /></el-icon>
+                  <span>报名时间: {{ formatDateTime(activity.registered_at) }}</span>
+                </div>
+
+                <div class="detail-item">
+                  <el-icon class="detail-icon"><Wallet /></el-icon>
+                  <span>实付: ¥{{ activity.paid_amount }}</span>
+                </div>
+              </div>
+
+              <div v-if="activity.note" class="activity-note">
+                <el-icon><Document /></el-icon>
+                <span>{{ activity.note }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -222,8 +290,11 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { User, TrendCharts, Money, Trophy, ArrowRight } from '@element-plus/icons-vue'
+import { User, TrendCharts, Money, Trophy, ArrowRight, Clock, Calendar, Wallet, Document, Picture, InfoFilled } from '@element-plus/icons-vue'
 import { activityApi } from '@/api/activities'
+
+// API 基础 URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 const loading = ref(false)
 const activitiesLoading = ref(false)
@@ -262,6 +333,17 @@ const formatDateTime = (dateTime) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+// 获取封面图片URL
+const getCoverImage = (imagePath) => {
+  if (!imagePath) return ''
+  // 如果是完整 URL，直接返回
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    return imagePath
+  }
+  // 否则直接返回相对路径（通过Vite代理访问）
+  return imagePath
 }
 
 const fetchSummary = async () => {
@@ -327,8 +409,21 @@ const showMemberActivities = async (memberId, year = null) => {
       })
     }
 
+    // 调试：检查封面图片数据
+    console.log('[DEBUG] 活动数据：', activities)
+    activities.forEach((act, index) => {
+      console.log(`[DEBUG] 活动${index + 1}:`, {
+        title: act.activity_title,
+        cover_image: act.activity_cover_image,
+        cover_image_type: typeof act.activity_cover_image,
+        cover_image_empty: !act.activity_cover_image,
+        generated_url: act.activity_cover_image ? getCoverImage(act.activity_cover_image) : 'N/A'
+      })
+    })
+
     memberActivities.value = activities
   } catch (error) {
+    console.error('[ERROR] 获取活动列表失败：', error)
     ElMessage.error('获取活动列表失败')
   } finally {
     activitiesLoading.value = false
@@ -533,5 +628,221 @@ onMounted(() => {
 .yearly-stats .stat-label {
   font-size: 12px;
   color: #909399;
+}
+
+/* 活动详情对话框样式 */
+.activities-dialog .el-dialog__body {
+  padding: 0 20px 20px;
+}
+
+.activities-container {
+  min-height: 300px;
+}
+
+.empty-state {
+  padding: 40px 0;
+}
+
+/* 活动卡片网格 */
+.activities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+  padding: 10px 0;
+}
+
+.activity-card {
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s;
+  border: 1px solid #e4e7ed;
+}
+
+.activity-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border-color: #409eff;
+}
+
+/* 活动封面 */
+.activity-cover {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.activity-cover .cover-image {
+  width: 100%;
+  height: 100%;
+}
+
+.activity-cover :deep(.el-image) {
+  width: 100%;
+  height: 100%;
+}
+
+.activity-cover :deep(.el-image__inner) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.activity-cover .no-cover {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  gap: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.activity-cover .no-cover span {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.activity-type-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+}
+
+/* 图片加载状态 */
+.image-error,
+.image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #f56c6c 0%, #ff8b8b 100%);
+  color: #fff;
+  font-size: 14px;
+}
+
+.image-placeholder {
+  background: linear-gradient(135deg, #909399 0%, #b1b3b8 100%);
+}
+
+/* 活动信息 */
+.activity-info {
+  padding: 16px;
+}
+
+.activity-title {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* 活动描述 */
+.activity-description {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%);
+  border-radius: 8px;
+  border-left: 3px solid #67c23a;
+  margin-bottom: 10px;
+}
+
+.description-icon {
+  font-size: 18px;
+  color: #67c23a;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.description-text {
+  margin: 0;
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.6;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* 活动类型描述 */
+.activity-type-description {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #e3f2fd 0%, #e8eaf6 100%);
+  border-radius: 6px;
+  border-left: 3px solid #409eff;
+  margin-bottom: 10px;
+}
+
+.type-icon {
+  font-size: 16px;
+  color: #409eff;
+  flex-shrink: 0;
+}
+
+.type-text {
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.activity-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.detail-icon {
+  font-size: 16px;
+  color: #909399;
+  flex-shrink: 0;
+}
+
+.activity-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+
+.activity-note .el-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 </style>

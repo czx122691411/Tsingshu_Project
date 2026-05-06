@@ -1,16 +1,40 @@
 from rest_framework import serializers
 from django.db.models import Count, Sum, Q
 from django.db.models.functions import ExtractYear
+from django.core.files.uploadedfile import SimpleUploadedFile
 from .models import Activity, ActivityParticipation, ActivityType
+
+
+class FlexibleImageField(serializers.ImageField):
+    """
+    灵活的图片字段，可以接受：
+    1. 文件对象（用于表单上传）
+    2. 字符串路径（用于已经上传的图片）
+    """
+    def to_internal_value(self, data):
+        # 如果是字符串且以 /media/ 开头，直接返回字符串
+        if isinstance(data, str):
+            if data.startswith('/media/'):
+                # 使用 removeprefix 移除前缀（Python 3.9+）
+                return data.removeprefix('/media/')
+            elif data.startswith('media/'):
+                return data.removeprefix('media/')
+        # 否则使用默认的 ImageField 处理
+        return super().to_internal_value(data)
 
 
 class ActivityTypeSerializer(serializers.ModelSerializer):
     """活动类型序列化器"""
+    activity_count = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = ActivityType
-        fields = ['id', 'name', 'code', 'color', 'description', 'is_active', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'code', 'color', 'description', 'is_active', 'activity_count', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_activity_count(self, obj):
+        """获取该类型的活动数量"""
+        return obj.activities.count()
 
 
 class ActivityParticipationSerializer(serializers.ModelSerializer):
@@ -35,7 +59,8 @@ class ActivityListSerializer(serializers.ModelSerializer):
     activity_type_name = serializers.CharField(source='activity_type.name', read_only=True)
     activity_type_code = serializers.CharField(source='activity_type.code', read_only=True)
     activity_type_color = serializers.CharField(source='activity_type.color', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
     registered_count = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
 
@@ -43,9 +68,18 @@ class ActivityListSerializer(serializers.ModelSerializer):
         model = Activity
         fields = [
             'id', 'title', 'activity_type', 'activity_type_name', 'activity_type_code', 'activity_type_color',
-            'location', 'start_time', 'end_time', 'fee', 'status',
+            'cover_image', 'start_time', 'end_time', 'fee', 'status',
             'status_display', 'registered_count', 'created_by_name'
         ]
+
+    def get_status(self, obj):
+        """动态计算活动状态"""
+        return obj.calculate_status()
+
+    def get_status_display(self, obj):
+        """获取状态显示文本"""
+        status = obj.calculate_status()
+        return dict(Activity.STATUS_CHOICES).get(status, '未知')
 
     def get_registered_count(self, obj):
         """获取已报名人数"""
@@ -58,7 +92,8 @@ class ActivityDetailSerializer(serializers.ModelSerializer):
     activity_type_name = serializers.CharField(source='activity_type.name', read_only=True)
     activity_type_code = serializers.CharField(source='activity_type.code', read_only=True)
     activity_type_color = serializers.CharField(source='activity_type.color', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
     registered_count = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     participations = ActivityParticipationSerializer(many=True, read_only=True)
@@ -67,11 +102,20 @@ class ActivityDetailSerializer(serializers.ModelSerializer):
         model = Activity
         fields = [
             'id', 'title', 'activity_type', 'activity_type_display', 'activity_type_name', 'activity_type_code', 'activity_type_color',
-            'location', 'start_time', 'end_time', 'fee', 'status',
+            'cover_image', 'start_time', 'end_time', 'fee', 'status',
             'status_display', 'description', 'registered_count',
             'created_by_name', 'created_at', 'updated_at', 'participations'
         ]
-        read_only_fields = ['id', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_status(self, obj):
+        """动态计算活动状态"""
+        return obj.calculate_status()
+
+    def get_status_display(self, obj):
+        """获取状态显示文本"""
+        status = obj.calculate_status()
+        return dict(Activity.STATUS_CHOICES).get(status, '未知')
 
     def get_registered_count(self, obj):
         """获取已报名人数"""
@@ -80,11 +124,24 @@ class ActivityDetailSerializer(serializers.ModelSerializer):
 
 class ActivityCreateSerializer(serializers.ModelSerializer):
     """活动创建序列化器"""
+    cover_image = FlexibleImageField(required=False, allow_null=True)
 
     class Meta:
         model = Activity
         fields = [
-            'title', 'activity_type', 'location',
+            'title', 'activity_type', 'cover_image',
+            'start_time', 'end_time', 'fee', 'description'
+        ]
+
+
+class ActivityUpdateSerializer(serializers.ModelSerializer):
+    """活动更新序列化器"""
+    cover_image = FlexibleImageField(required=False, allow_null=True)
+
+    class Meta:
+        model = Activity
+        fields = [
+            'title', 'activity_type', 'cover_image',
             'start_time', 'end_time', 'fee', 'description'
         ]
 
@@ -111,16 +168,19 @@ class MemberActivityDetailSerializer(serializers.ModelSerializer):
     activity_type_name = serializers.CharField(source='activity.activity_type.name', read_only=True)
     activity_type_code = serializers.CharField(source='activity.activity_type.code', read_only=True)
     activity_type_color = serializers.CharField(source='activity.activity_type.color', read_only=True)
-    activity_location = serializers.CharField(source='activity.location', read_only=True)
+    activity_type_description = serializers.CharField(source='activity.activity_type.description', read_only=True, allow_blank=True)
+    activity_cover_image = serializers.ImageField(source='activity.cover_image', read_only=True)
     activity_start_time = serializers.DateTimeField(source='activity.start_time', read_only=True)
+    activity_end_time = serializers.DateTimeField(source='activity.end_time', read_only=True, allow_null=True)
     activity_fee = serializers.DecimalField(source='activity.fee', max_digits=10, decimal_places=2, read_only=True)
+    activity_description = serializers.CharField(source='activity.description', read_only=True, allow_blank=True)
 
     class Meta:
         model = ActivityParticipation
         fields = [
             'id', 'activity', 'activity_title', 'activity_type_name', 'activity_type_code', 'activity_type_color',
-            'activity_location', 'activity_start_time',
-            'activity_fee', 'registered_at', 'paid_amount', 'note'
+            'activity_type_description', 'activity_cover_image', 'activity_start_time', 'activity_end_time',
+            'activity_fee', 'activity_description', 'registered_at', 'paid_amount', 'note'
         ]
 
 

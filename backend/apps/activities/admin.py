@@ -15,21 +15,21 @@ class ActivityTypeAdmin(admin.ModelAdmin):
 class ActivityAdmin(admin.ModelAdmin):
     """活动管理后台"""
     list_display = [
-        'title', 'activity_type', 'location',
+        'title', 'activity_type', 'cover_image_thumbnail',
         'start_time', 'end_time', 'fee',
         'status', 'registered_count', 'created_at'
     ]
     list_filter = ['activity_type', 'status', 'start_time']
-    search_fields = ['title', 'location', 'description']
+    search_fields = ['title', 'description']
     readonly_fields = ['status', 'created_at', 'updated_at']
     date_hierarchy = 'start_time'
 
     fieldsets = (
         ('基本信息', {
-            'fields': ('title', 'activity_type', 'description')
+            'fields': ('title', 'activity_type', 'cover_image', 'description')
         }),
-        ('时间地点', {
-            'fields': ('start_time', 'end_time', 'location')
+        ('时间', {
+            'fields': ('start_time', 'end_time')
         }),
         ('费用与状态', {
             'fields': ('fee', 'status')
@@ -39,6 +39,14 @@ class ActivityAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+    def cover_image_thumbnail(self, obj):
+        """显示封面缩略图"""
+        if obj.cover_image:
+            from django.utils.html import format_html
+            return format_html('<img src="{}" style="width: 50px; height: 50px; object-fit: cover;" />', obj.cover_image.url)
+        return '无封面'
+    cover_image_thumbnail.short_description = '封面'
 
     def registered_count(self, obj):
         """显示已报名人数"""
