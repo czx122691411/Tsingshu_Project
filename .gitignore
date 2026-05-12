@@ -25,8 +25,9 @@ wheels/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-/media
-/staticfiles
+/media/
+/backend/media/
+/staticfiles/
 .env
 
 # Vue / Node.js
